@@ -2,6 +2,7 @@ const emptyLane = id => ({id, mediaId:null, previewId:null, monitorId:null, play
 const position = (lane, now=Date.now()) => lane.offset + (lane.playing ? Math.max(0,now-lane.epoch)/1000 : 0);
 function updateLane(lane, action, value, now=Date.now()) {
   switch(action) {
+    case 'load': return {...lane,mediaId:value,previewId:value,offset:0,epoch:now,playing:true,blackout:false};
     case 'cue': return {...lane,previewId:value};
     case 'take': return {...lane,mediaId:lane.previewId,offset:0,epoch:now,playing:!!lane.previewId,blackout:false};
     case 'play': return lane.playing ? lane : {...lane,epoch:now,playing:!!lane.mediaId};

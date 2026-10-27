@@ -1,6 +1,8 @@
 const {app,BrowserWindow,ipcMain,screen,dialog,protocol,net}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url'),{randomUUID}=require('node:crypto'),{execFile}=require('node:child_process');
 const {emptyLane,position,updateLane}=require('./state.cjs');
+const {createPerformanceMonitor}=require('./performance.cjs');
+let performanceMonitor;
 protocol.registerSchemesAsPrivileged([{scheme:'ava',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 let control;const outputs=new Map(),media=new Map();let lanes=Array.from({length:5},(_,i)=>emptyLane(i)),audioLane=null;
 const root=path.resolve(__dirname,'..');
@@ -26,17 +28,19 @@ function convertOffice(file){return new Promise((resolve,reject)=>{
  execFile(bin,['-env:UserInstallation='+pathToFileURL(path.join(dir,'profile')).href,'--headless','--convert-to','pdf','--outdir',dir,file],{timeout:120000},(err)=>{const pdf=path.join(dir,path.basename(file,path.extname(file))+'.pdf');if(err||!fs.existsSync(pdf))reject(Error('تبدیل پاورپوینت انجام نشد. فایل را به PDF تبدیل و وارد کنید.'));else resolve(pdf);});
 });}
 async function importFiles(files){
- if(!files){const r=await dialog.showOpenDialog(control,{properties:['openFile','multiSelections'],filters:[{name:'رسانه',extensions:['mp4','mov','m4v','webm','mkv','mp3','wav','ogg','jpg','jpeg','png','webp','gif','bmp','pdf','ppt','pptx']}]});if(r.canceled)return {errors:[]};files=r.filePaths;}
- const errors=[];
- for(const file of files){try{if(typeof file!=='string'||!fs.statSync(file).isFile())continue;const ext=path.extname(file).toLowerCase();let kind=/^\.(mp4|mov|m4v|webm|mkv)$/.test(ext)?'video':/^\.(mp3|wav|ogg)$/.test(ext)?'audio':/^\.(png|jpe?g|webp|gif|bmp)$/.test(ext)?'image':ext==='.pdf'?'pdf':/^\.pptx?$/.test(ext)?'office':null;if(!kind)throw Error('این قالب پشتیبانی نمی‌شود.');let playable=file;if(kind==='office'){playable=await convertOffice(file);kind='pdf';}const id=randomUUID();media.set(id,{id,name:path.basename(file),kind,file:playable,url:`ava://app/media/${id}`});}catch(e){errors.push(path.basename(file)+': '+e.message);}}
- broadcast();return {errors};
+ if(!files){const r=await dialog.showOpenDialog(control,{properties:['openFile','multiSelections'],filters:[{name:'رسانه',extensions:['mp4','mov','m4v','webm','mkv','mp3','wav','ogg','jpg','jpeg','png','webp','gif','bmp','pdf','ppt','pptx']}]});if(r.canceled)return {errors:[],added:[]};files=r.filePaths;}
+ const errors=[],added=[];
+ for(const file of files){try{if(typeof file!=='string'||!fs.statSync(file).isFile())continue;const ext=path.extname(file).toLowerCase();let kind=/^\.(mp4|mov|m4v|webm|mkv)$/.test(ext)?'video':/^\.(mp3|wav|ogg)$/.test(ext)?'audio':/^\.(png|jpe?g|webp|gif|bmp)$/.test(ext)?'image':ext==='.pdf'?'pdf':/^\.pptx?$/.test(ext)?'office':null;if(!kind)throw Error('این قالب پشتیبانی نمی‌شود.');let playable=file;if(kind==='office'){playable=await convertOffice(file);kind='pdf';}const id=randomUUID();media.set(id,{id,name:path.basename(file),kind,file:playable,url:`ava://app/media/${id}`});added.push(id);}catch(e){errors.push(path.basename(file)+': '+e.message);}}
+ broadcast();return {errors,added};
 }
 app.whenReady().then(async()=>{
  restore();
+ performanceMonitor=createPerformanceMonitor(data=>{if(control&&!control.isDestroyed())control.webContents.send('stats',data);});
+ ipcMain.handle('stats',()=>performanceMonitor.get());
  protocol.handle('ava',request=>{const u=new URL(request.url);let file;if(u.hostname==='app'&&u.pathname.startsWith('/media/'))file=media.get(u.pathname.slice(7))?.file;else if(u.hostname==='app'){const resolved=path.resolve(root,'.'+decodeURIComponent(u.pathname));if(resolved.startsWith(root+path.sep)&&['/app/','/assets/','/node_modules/pdfjs-dist/'].some(p=>u.pathname.startsWith(p)))file=resolved;}
  if(!file)return new Response('Not found',{status:404});return net.fetch(pathToFileURL(file).href,{headers:request.headers});});
  ipcMain.handle('init',()=>state());ipcMain.handle('import',(_,files)=>importFiles(files));
- ipcMain.handle('action',(_,v)=>{if(!Number.isInteger(v.id)||!lanes[v.id])return;if(['cue'].includes(v.action)&&!media.has(v.value))return;if(v.action==='monitorId'&&v.value!==null&&!monitors().some(m=>m.id===v.value))return;lanes[v.id]=updateLane(lanes[v.id],v.action,v.value);if(v.action==='monitorId'||v.action==='take')output(lanes[v.id],true);broadcast();});
+ ipcMain.handle('action',(_,v)=>{if(!Number.isInteger(v.id)||!lanes[v.id])return;if(['cue','load'].includes(v.action)&&!media.has(v.value))return;if(v.action==='monitorId'&&v.value!==null&&!monitors().some(m=>m.id===v.value))return;lanes[v.id]=updateLane(lanes[v.id],v.action,v.value);if(v.action==='monitorId'||v.action==='take'||v.action==='load')output(lanes[v.id],true);broadcast();});
  ipcMain.handle('audio',(_,id)=>{audioLane=id===null||lanes[id]?id:null;broadcast();});
  ipcMain.handle('blackout',()=>{lanes=lanes.map(l=>({...l,blackout:true}));broadcast();});
  ipcMain.handle('remove',(_,id)=>{if(lanes.some(l=>l.mediaId===id))return {error:'این فایل روی خروجی فعال است؛ ابتدا فایل دیگری اجرا کنید.'};media.delete(id);lanes=lanes.map(l=>({...l,previewId:l.previewId===id?null:l.previewId}));broadcast();return {};});
@@ -44,5 +48,5 @@ app.whenReady().then(async()=>{
  control=makeWindow();control.on('closed',()=>app.quit());await control.loadURL('ava://app/app/index.html');
  for(const event of ['display-added','display-removed','display-metrics-changed'])screen.on(event,()=>{const ids=monitors().map(m=>m.id);lanes=lanes.map(l=>ids.includes(l.monitorId)?l:{...l,monitorId:null});for(const l of lanes)output(l);broadcast();});
 });
-app.on('before-quit',persist);
+app.on('before-quit',()=>{persist();performanceMonitor?.stop();});
 app.on('window-all-closed',()=>app.quit());

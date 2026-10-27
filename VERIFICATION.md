@@ -1,10 +1,11 @@
-# Verification of 0.1.0
+# Verification of 0.2.0 (second version)
 
-- Clean `npm ci --ignore-scripts=false`: passed with Node 24 and the lockfile.
-- `npm test`: 4 tests passed, 0 failures.
-- `npm run smoke`: passed using actual Electron 45.1.0 on headless Linux. Checked five simultaneous H.264/AAC video lanes, PNG loading, PDF page pixel colors and seeking, Cue/Take isolation, pause/resume, single-lane audio muting, stretch mode, two actual output windows sharing the virtual display, simulated monitor removal, global blackout, and session persistence after relaunch. No renderer page errors.
-- `npm audit --omit=dev --audit-level=high`: no production dependency vulnerabilities reported at setup time.
-- Windows x64 unpacked build: completed; embedded application source, CSS and logo matched the tested source byte for byte.
-- Native NSIS installer compilation completed successfully, without compiler warnings. It is compiled directly on Linux using electron-builder's checksum-verified NSIS 3 toolset and `build/installer.nsi`. The standard electron-builder installer route on this Linux host failed because Wine could not load ntdll; the Windows CI configuration uses the standard native Windows route.
+- `npm test`: 9 tests passed. Covers GPU aggregation across processes, independent engines and multiple adapters, 100% clamping, idle versus unavailable GPU, CPU tick sampling and hot-plug/reset, cue/take, five independent lanes, pause/resume/seek, and atomic direct-to-final loading.
+- `npm run smoke`: passed using actual Electron 45.1.0 on headless Linux. Real mouse drags from the bank to all five finals, preview-only cueing, thumbnail-area dragging, repeated drops, MP4 playback, PNG loading, PDF pixel colors/page seeking, rapid PDF/video/image replacements, stable card DOM during state changes, audio isolation, fit, actual output windows, simulated monitor removal, blackout and session restore were exercised. No renderer page errors.
+- The external output drop path is tested with a DataTransfer event. Native OS dragging across physical Windows displays is unverified.
+- CPU/RAM readings are real local OS samples. Linux GPU is unsupported and displays a dash. The UI's ready-GPU percentage path is tested with an injected test sample; that is not evidence of measuring a physical GPU.
+- `tests/windows-performance.cjs` is a required Windows-hosted step of the upload workflow. It checks that the actual PowerShell/CIM helper responds, CPU/RAM sampling works, GPU data is either valid or explicitly unavailable, and the helper can be stopped. A runner without GPU counters may validly report unavailable. Publication waits for this check; the Actions run is the evidence of its result.
+- A Windows x64 unpacked package is built with Electron Builder, then the direct NSIS 3 script creates the installer on Linux. The packaged app is compared byte for byte with the tested app files. The direct installer uses zlib compression and a file-specific uninstall manifest.
+- The previous native Windows `npm run dist:win` CI build failed. It remains a manual diagnostic workflow, not the automatic publication path. The uploaded installer is the verified direct NSIS build. Its SHA256 is checked again in the publication workflow and after a public GitHub download.
 
-Not verified here: installation/uninstallation on Windows, physical sound output, five physical displays, mixed-DPI physical display placement, five streams at 4K, or LibreOffice conversion. Headless software rendering and a simulated unplug do not establish hardware performance or Windows installation readiness. The installer is unsigned.
+Not verified here: installation/uninstallation on Windows, physical sound, five physical displays, mixed-DPI placement, actual hardware GPU percentages, five streams at 4K, or LibreOffice conversion. The installer is unsigned. Source and binaries for 0.1.0 remain available separately.

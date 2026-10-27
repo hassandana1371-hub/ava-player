@@ -1,6 +1,8 @@
 const {contextBridge,ipcRenderer,webUtils}=require('electron');
 contextBridge.exposeInMainWorld('ava',{
   init:()=>ipcRenderer.invoke('init'),
+  getStats:()=>ipcRenderer.invoke('stats'),
+  onStats:fn=>{const h=(_,s)=>fn(s);ipcRenderer.on('stats',h);return()=>ipcRenderer.removeListener('stats',h);},
   importFiles:()=>ipcRenderer.invoke('import'),
   dropFiles:files=>ipcRenderer.invoke('import',Array.from(files).map(f=>webUtils.getPathForFile(f))),
   action:(id,action,value)=>ipcRenderer.invoke('action',{id,action,value}),

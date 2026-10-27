@@ -6,7 +6,7 @@ OutFile "${OUT_FILE}"
 InstallDir "$LOCALAPPDATA\Programs\AVA Player"
 InstallDirRegKey HKCU "Software\AVA Player" "InstallDir"
 RequestExecutionLevel user
-SetCompressor /SOLID lzma
+SetCompressor zlib
 !define MUI_ABORTWARNING
 !define MUI_ICON "${ICON_FILE}"
 !define MUI_UNICON "${ICON_FILE}"
@@ -28,7 +28,7 @@ Section "AVA Player" SEC_MAIN
   CreateShortcut "$DESKTOP\AVA Player.lnk" "$INSTDIR\AVA Player.exe"
   WriteRegStr HKCU "Software\AVA Player" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AVA Player" "DisplayName" "AVA Player"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AVA Player" "DisplayVersion" "0.1.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AVA Player" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AVA Player" "Publisher" "AVA"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AVA Player" "DisplayIcon" "$INSTDIR\AVA Player.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AVA Player" "UninstallString" '"$INSTDIR\Uninstall.exe"'

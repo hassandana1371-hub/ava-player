@@ -1,15 +1,75 @@
 import * as pdfjs from '../node_modules/pdfjs-dist/build/pdf.mjs';
-pdfjs.GlobalWorkerOptions.workerSrc='ava://app/node_modules/pdfjs-dist/build/pdf.worker.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = 'ava://app/node_modules/pdfjs-dist/build/pdf.worker.mjs';
 export class Player {
- constructor(host,{preview=false,audio=false}={}){this.host=host;this.preview=preview;this.audio=audio;this.key=null;this.tick=setInterval(()=>this.sync(),250);this.resize=new ResizeObserver(()=>{this.pdfPage=-1;this.sync()});this.resize.observe(host);}
- set(lane,media,audible=false){this.lane=lane;this.audible=audible;const key=media?.id||null;if(this.key!==key){this.key=key;this.error=null;this.pdf?.destroy();this.pdf=null;this.pdfPage=-1;this.el?.pause?.();this.host.replaceChildren();this.el=null;this.start=Date.now();if(media)this.load(media);else{const p=document.createElement('span');p.className='empty';p.textContent=this.preview?'فایل را اینجا رها کنید':'آمادهٔ پخش';this.host.append(p);}}this.host.classList.toggle('blacked',!this.preview&&lane.blackout);this.sync();}
- async load(media){const key=this.key;this.kind=media.kind;
- if(media.kind==='pdf'){this.el=document.createElement('canvas');this.host.append(this.el);try{const response=await fetch(media.url);if(!response.ok)throw Error('PDF unavailable');const data=new Uint8Array(await response.arrayBuffer());const pdf=await pdfjs.getDocument({data,isEvalSupported:false}).promise;if(this.key!==key){pdf.destroy();return;}this.pdf=pdf;this.sync();}catch(e){console.error('PDF load:',e);if(this.key===key)this.fail('خواندن PDF انجام نشد.');}return;}
- const el=document.createElement(media.kind==='image'?'img':media.kind==='audio'?'audio':'video');this.el=el;el.src=media.url;el.draggable=false;el.muted=true;el.preload='auto';el.playsInline=true;el.addEventListener('error',()=>this.fail('این فایل قابل پخش نیست؛ قالب یا کدک را به MP4 با H.264/AAC تبدیل کنید.'));el.addEventListener('loadedmetadata',()=>this.sync());this.host.append(el);if(media.kind==='audio'){const label=document.createElement('span');label.className='empty';label.textContent='♫ فایل صوتی';this.host.append(label);} }
- fail(message){if(this.error)return;this.error=message;const e=document.createElement('span');e.className='media-error';e.textContent=message;this.host.append(e);}
- time(){const l=this.lane;return this.preview?(Date.now()-this.start)/1000:(l.offset+(l.playing?Math.max(0,Date.now()-l.epoch)/1000:0));}
- duration(){return this.pdf?this.pdf.numPages*this.lane.slideSeconds:Number.isFinite(this.el?.duration)?this.el.duration:0;}
- async sync(){const el=this.el,l=this.lane;if(!el||!l)return;el.style.objectFit=l.fit;const t=this.time(),d=this.duration(),loop=this.preview||l.loop;const desired=d?(loop?t%d:Math.min(t,d)):t;
- if(this.pdf){const page=Math.min(this.pdf.numPages,Math.floor(desired/l.slideSeconds)+1);if(this.rendering||this.pdfPage===page)return;this.rendering=true;const pdf=this.pdf,key=this.key;try{const p=await pdf.getPage(page);if(this.key!==key)return;const original=p.getViewport({scale:1}),scale=Math.min(2,Math.max(this.host.clientWidth/original.width,this.host.clientHeight/original.height));const vp=p.getViewport({scale});el.width=vp.width;el.height=vp.height;await p.render({canvasContext:el.getContext('2d'),viewport:vp}).promise;if(this.key===key)this.pdfPage=page;}catch(e){console.error('PDF render:',e);if(this.key===key)this.fail('نمایش اسلاید انجام نشد.');}finally{this.rendering=false;}return;}
- if(el instanceof HTMLMediaElement){el.loop=loop;el.volume=l.volume;el.muted=!(this.audio&&this.audible&&!this.preview&&!l.blackout);if(el.readyState>=1&&Math.abs(el.currentTime-desired)>0.4)try{el.currentTime=desired;}catch{}const play=this.preview||l.playing&&(loop||!d||t<d);if(play&&el.paused)el.play().catch(e=>{if(e.name==='NotSupportedError')this.fail('کدک این فایل پشتیبانی نمی‌شود.');});else if(!play&&!el.paused)el.pause();}}
+  constructor(host, { preview = false, audio = false } = {}) {
+    this.host = host; this.preview = preview; this.audio = audio; this.key = null; this.generation = 0;
+    this.tick = setInterval(() => this.sync(), 250);
+    this.resize = new ResizeObserver(() => { this.pdfPage = -1; this.sync(); }); this.resize.observe(host);
+  }
+  set(lane, media, audible = false) {
+    this.lane = lane; this.audible = audible; const key = media?.id || null;
+    if (this.key !== key) {
+      this.key = key; const generation = ++this.generation; this.error = null;
+      const previous = this.el; this.el = null;
+      // Release the previous decoder immediately when files are dropped rapidly.
+      if (previous instanceof HTMLMediaElement) { previous.pause(); previous.removeAttribute('src'); previous.load(); }
+      this.renderTask?.cancel(); this.renderTask = null;
+      this.pdf?.destroy(); this.pdf = null; this.pdfPage = -1;
+      this.host.replaceChildren(); this.start = Date.now();
+      if (media) this.load(media, generation);
+      else { const p = document.createElement('span'); p.className = 'empty'; p.textContent = this.preview ? 'فایل را اینجا رها کنید' : 'آمادهٔ پخش'; this.host.append(p); }
+    }
+    this.host.classList.toggle('blacked', !this.preview && lane.blackout); this.sync();
+  }
+  async load(media, generation) {
+    if (media.kind === 'pdf') {
+      this.el = document.createElement('canvas'); this.host.append(this.el);
+      try {
+        const response = await fetch(media.url); if (!response.ok) throw Error('PDF unavailable');
+        const data = new Uint8Array(await response.arrayBuffer());
+        if (this.generation !== generation) return;
+        const pdf = await pdfjs.getDocument({ data, isEvalSupported: false }).promise;
+        if (this.generation !== generation) { pdf.destroy(); return; }
+        this.pdf = pdf; this.sync();
+      } catch (e) { if (this.generation === generation) { console.error('PDF load:', e); this.fail('خواندن PDF انجام نشد.'); } }
+      return;
+    }
+    const el = document.createElement(media.kind === 'image' ? 'img' : media.kind === 'audio' ? 'audio' : 'video');
+    this.el = el; el.src = media.url; el.draggable = false; el.muted = true; el.preload = 'auto'; el.playsInline = true;
+    el.addEventListener('error', () => { if (this.el === el) this.fail('این فایل قابل پخش نیست؛ قالب یا کدک را به MP4 با H.264/AAC تبدیل کنید.'); });
+    el.addEventListener('loadedmetadata', () => { if (this.el === el) this.sync(); }); this.host.append(el);
+    if (media.kind === 'audio') { const label = document.createElement('span'); label.className = 'empty'; label.textContent = '♫ فایل صوتی'; this.host.append(label); }
+  }
+  fail(message) { if (this.error) return; this.error = message; const e = document.createElement('span'); e.className = 'media-error'; e.textContent = message; this.host.append(e); }
+  time() { const l = this.lane; return this.preview ? (Date.now() - this.start) / 1000 : l.offset + (l.playing ? Math.max(0, Date.now() - l.epoch) / 1000 : 0); }
+  duration() { return this.pdf ? this.pdf.numPages * this.lane.slideSeconds : Number.isFinite(this.el?.duration) ? this.el.duration : 0; }
+  async sync() {
+    const el = this.el, l = this.lane, generation = this.generation; if (!el || !l) return;
+    el.style.objectFit = l.fit;
+    const t = this.time(), d = this.duration(), loop = this.preview || l.loop, desired = d ? (loop ? t % d : Math.min(t, d)) : t;
+    if (this.pdf) {
+      const page = Math.min(this.pdf.numPages, Math.floor(desired / l.slideSeconds) + 1);
+      if (this.rendering === generation || this.pdfPage === page) return;
+      this.rendering = generation; const pdf = this.pdf;
+      try {
+        const p = await pdf.getPage(page); if (this.generation !== generation) return;
+        const original = p.getViewport({ scale: 1 });
+        const scale = Math.min(2, Math.max(this.host.clientWidth / original.width, this.host.clientHeight / original.height));
+        const vp = p.getViewport({ scale }); el.width = vp.width; el.height = vp.height;
+        const task = p.render({ canvasContext: el.getContext('2d'), viewport: vp }); this.renderTask = task;
+        await task.promise;
+        if (this.renderTask === task) this.renderTask = null;
+        if (this.generation === generation) this.pdfPage = page;
+      } catch (e) { if (this.generation === generation) { console.error('PDF render:', e); this.fail('نمایش اسلاید انجام نشد.'); } }
+      finally { if (this.rendering === generation) this.rendering = null; }
+      return;
+    }
+    if (el instanceof HTMLMediaElement) {
+      el.loop = loop; el.volume = l.volume; el.muted = !(this.audio && this.audible && !this.preview && !l.blackout);
+      if (el.readyState >= 1 && Math.abs(el.currentTime - desired) > 0.4) try { el.currentTime = desired; } catch {}
+      const play = this.preview || l.playing && (loop || !d || t < d);
+      if (play && el.paused) el.play().catch(e => { if (this.el === el && e.name === 'NotSupportedError') this.fail('کدک این فایل پشتیبانی نمی‌شود.'); });
+      else if (!play && !el.paused) el.pause();
+    }
+  }
 }

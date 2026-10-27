@@ -1,25 +1,49 @@
 name: Upload verified installer
 on:
   push:
-    branches: ['installer-upload/v0.1.0']
+    branches: ['installer-upload/v*']
 permissions:
   contents: write
 jobs:
+  windows-statistics:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Select version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME -replace '^installer-upload/', ''
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Invalid version tag.' }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test tests/performance.test.cjs tests/state.test.cjs
+      - run: node tests/windows-performance.cjs
   publish:
+    needs: windows-statistics
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Reassemble and verify the original installer
         run: |
-          cat payload/part-* > AVA-Player-Setup-0.1.0-x64.exe
+          version="${GITHUB_REF_NAME#installer-upload/v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          asset="AVA-Player-Setup-${version}-x64.exe"
+          cat payload/part-* > "$asset"
           sha256sum --check installer.sha256
+          echo "RELEASE_TAG=v${version}" >> "$GITHUB_ENV"
+          echo "INSTALLER_ASSET=$asset" >> "$GITHUB_ENV"
       - name: Publish the verified installer
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload v0.1.0 AVA-Player-Setup-0.1.0-x64.exe --repo "$GITHUB_REPOSITORY" --clobber
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$INSTALLER_ASSET" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create v0.1.0 AVA-Player-Setup-0.1.0-x64.exe --repo "$GITHUB_REPOSITORY" --verify-tag --title "AVA Player v0.1.0" --notes-file RELEASE-NOTES.md --prerelease
+            gh release create "$RELEASE_TAG" "$INSTALLER_ASSET" --repo "$GITHUB_REPOSITORY" --verify-tag --title "AVA Player $RELEASE_TAG" --notes-file RELEASE-NOTES.md --prerelease
           fi
