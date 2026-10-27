@@ -2,6 +2,7 @@ name: Publish Windows installer
 on:
   push:
     tags: ['v*']
+    branches: ['release/v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -17,6 +18,12 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Select version tag
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG -replace '^release/', ''
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') { throw 'A version tag is required.' }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
