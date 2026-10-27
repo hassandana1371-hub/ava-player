@@ -1,0 +1,25 @@
+name: Upload verified installer
+on:
+  push:
+    branches: ['installer-upload/v0.1.0']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble and verify the original installer
+        run: |
+          cat payload/part-* > AVA-Player-Setup-0.1.0-x64.exe
+          sha256sum --check installer.sha256
+      - name: Publish the verified installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v0.1.0 AVA-Player-Setup-0.1.0-x64.exe --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v0.1.0 AVA-Player-Setup-0.1.0-x64.exe --repo "$GITHUB_REPOSITORY" --verify-tag --title "AVA Player v0.1.0" --notes-file RELEASE-NOTES.md --prerelease
+          fi
