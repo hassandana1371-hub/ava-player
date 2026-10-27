@@ -1,0 +1,57 @@
+name: Publish Windows installer
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish (for example v0.1.0)
+        required: true
+        default: v0.1.0
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Name the download
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path dist -Filter '*Setup*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'The Windows installer was not generated.' }
+          $assetName = 'AVA-Player-Setup-' + ($env:RELEASE_TAG -replace '^v', '') + '-x64.exe'
+          Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path dist $assetName)
+          Get-FileHash -Algorithm SHA256 (Join-Path dist $assetName) | Format-List
+          "INSTALLER_ASSET=dist/$assetName" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AVA-Player-Windows-x64
+          path: ${{ env.INSTALLER_ASSET }}
+          if-no-files-found: error
+      - name: Publish the download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG $env:INSTALLER_ASSET --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $env:RELEASE_TAG $env:INSTALLER_ASSET --repo $env:GITHUB_REPOSITORY --verify-tag --title "AVA Player $env:RELEASE_TAG" --notes-file RELEASE-NOTES.md --prerelease
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed.' }
